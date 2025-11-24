@@ -1,5 +1,5 @@
 import { Handler } from '@netlify/functions';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const handler: Handler = async (event, context) => {
   // 只允许 POST 请求
@@ -22,8 +22,13 @@ const handler: Handler = async (event, context) => {
       return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error' }) };
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    const model = 'gemini-1.5-flash';
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
+    });
     
     const prompt = `
       You are an expert transcriber and editor.
@@ -37,30 +42,13 @@ const handler: Handler = async (event, context) => {
       3. Length: Each chapter's content should be substantial (at least 5-6 paragraphs).
       4. Structure: Divide the video into 5-10 chapters.
       
-      Return JSON data with the following schema:
-      Array of Objects: { title: string, content: string (Markdown format) }
+      Return a JSON ARRAY of objects. Do not wrap it in any other object.
+      Schema: Array<{ title: string, content: string (Markdown format) }>
     `;
 
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              content: { type: Type.STRING }
-            },
-            required: ["title", "content"]
-          }
-        }
-      }
-    });
-
-    const text = response.text;
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
     if (!text) throw new Error("No response from Gemini");
 
     return {
