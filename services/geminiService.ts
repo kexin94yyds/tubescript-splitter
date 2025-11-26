@@ -1,29 +1,59 @@
+import { GoogleGenAI, Type } from "@google/genai";
 import { Chapter } from "../types";
+
+// Initialize Gemini Client
+const apiKey = process.env.API_KEY || '';
+const ai = new GoogleGenAI({ apiKey });
 
 // Helper to simulate "watching" the video and getting chapters
 export const generateMockChapters = async (videoTitle: string): Promise<Chapter[]> => {
+  if (!apiKey) {
+    console.warn("No API Key provided, returning fallback data");
+    return getFallbackChapters(videoTitle);
+  }
+
   try {
-    console.log("Requesting chapters from backend API...");
-    
-    // Call our secure backend function
-    // In development (Vite), this is proxied to the Netlify Function
-    // In production, this hits the same domain
-    const response = await fetch('/.netlify/functions/gemini', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ videoTitle }),
+    console.log("Initializing Gemini with Key:", apiKey ? "Present (" + apiKey.slice(0, 4) + "...)" : "Missing");
+    const model = 'gemini-1.5-flash';
+    const prompt = `
+      You are an expert transcriber and editor.
+      I have a YouTube video titled "${videoTitle}". 
+      
+      Please generate a comprehensive, highly detailed, verbatim-style transcript of this video, broken down into logical chapters.
+      
+      IMPORTANT INSTRUCTIONS:
+      1. Language: If the title is in Chinese, the content MUST be in Chinese. If the title is English, use English.
+      2. Detail Level: The 'content' must NOT be a summary. It should look like a full book chapter or a detailed lecture transcript. Include dialogue, explanations, examples, and technical details mentioned in such a video.
+      3. Length: Each chapter's content should be substantial (at least 5-6 paragraphs).
+      4. Structure: Divide the video into 5-10 chapters.
+      
+      Return JSON data with the following schema:
+      Array of Objects: { title: string, content: string (Markdown format) }
+    `;
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              content: { type: Type.STRING }
+            },
+            required: ["title", "content"]
+          }
+        }
+      }
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.warn("Backend API returned error:", response.status, errorData);
-      throw new Error(errorData.error || `API Request failed: ${response.status}`);
-    }
+    const text = response.text;
+    if (!text) throw new Error("No response from Gemini");
 
-    const rawChapters = await response.json();
-    
+    const rawChapters = JSON.parse(text);
     return rawChapters.map((ch: any, idx: number) => ({
       index: idx + 1,
       title: ch.title,
@@ -31,8 +61,7 @@ export const generateMockChapters = async (videoTitle: string): Promise<Chapter[
     }));
 
   } catch (error) {
-    console.error("Chapter Generation Error:", error);
-    console.warn("Falling back to mock data due to API failure");
+    console.error("Gemini API Error:", error);
     return getFallbackChapters(videoTitle);
   }
 };
